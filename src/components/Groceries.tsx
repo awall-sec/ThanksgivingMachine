@@ -5,11 +5,9 @@ import { uid } from '../lib/format'
 import { confetti } from './confetti'
 
 const STORE_STYLE: Record<string, { emoji: string; cls: string }> = {
-  "Sam's": { emoji: '📦', cls: 'st-sams' },
-  Meijer: { emoji: '🛒', cls: 'st-meijer' },
-  'Fruit Mkt': { emoji: '🥕', cls: 'st-fruit' },
+  Costco: { emoji: '📦', cls: 'st-sams' },
+  HEB: { emoji: '🛒', cls: 'st-meijer' },
   Other: { emoji: '🛍️', cls: 'st-other' },
-  'On hand': { emoji: '🏠', cls: 'st-onhand' },
 }
 
 export function Groceries() {
@@ -18,7 +16,7 @@ export function Groceries() {
   const [hideChecked, setHideChecked] = useState(false)
   const [name, setName] = useState('')
   const [qty, setQty] = useState('')
-  const [store, setStore] = useState<string>('Meijer')
+  const [store, setStore] = useState<string>('HEB')
 
   const unpicked = [...db.dishes].sort((a, b) => a.sort - b.sort).filter((d) => !d.chosen_recipe_id && db.recipes.some((r) => r.dish_id === d.id))
   const done = lines.filter((l) => l.checked).length
@@ -85,7 +83,7 @@ export function Groceries() {
           return (
             <section key={s} className={`card store ${STORE_STYLE[s].cls}`}>
               <header>
-                <h3>{STORE_STYLE[s].emoji} {s}{s === 'On hand' && <small> — check the pantry</small>}</h3>
+                <h3>{STORE_STYLE[s].emoji} {s}</h3>
                 <span className="pill">{left ? `${left} left` : 'All done! 🎉'}</span>
               </header>
               <ul className="glist">

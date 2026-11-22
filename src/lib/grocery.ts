@@ -1,24 +1,24 @@
 import type { DB } from '../types'
 import { fmtQty } from './format'
 
-export const STORES = ["Sam's", 'Meijer', 'Fruit Mkt', 'Other', 'On hand'] as const
+export const STORES = ['Costco', 'HEB', 'Other'] as const
 
-// Store assignments from the family sheet (first match wins, so specific terms go first).
+// Default stores (Costco for bulk items, HEB for the rest, Other for pantry staples) (first match wins, so specific terms go first).
 const STORE_RULES: [string, string][] = [
-  ['brussel', 'Fruit Mkt'], ['parsley', 'Fruit Mkt'], ['thyme', 'Fruit Mkt'], ['celery', 'Fruit Mkt'], ['carrot', 'Fruit Mkt'], ['parsnip', 'Fruit Mkt'],
-  ['rosemary', 'Fruit Mkt'], ['mint', 'Fruit Mkt'], ['chive', 'Fruit Mkt'], ['dill', 'Fruit Mkt'], ['shallot', 'Fruit Mkt'], ['sweet potato', 'Fruit Mkt'], ['cranberr', 'Fruit Mkt'],
-  ['ground sage', 'On hand'], ['bay leaf', 'On hand'], ['cinnamon', 'On hand'], ['salt', 'On hand'], ['pepper', 'On hand'], ['pumpkin pie spice', 'On hand'],
-  ['pumpkin', 'On hand'], ['condensed milk', 'On hand'], ['coffee', 'On hand'], ['nutmeg', 'On hand'], ['ground ginger', 'On hand'], ['paprika', 'On hand'], ['vanilla', 'On hand'],
-  ['brown sugar', "Sam's"], ['chicken stock', "Sam's"], ['onion', "Sam's"], ['apple', "Sam's"], ['egg', "Sam's"], ['sour cream', "Sam's"], ['potato', "Sam's"],
-  ['green bean', "Sam's"], ["french's", "Sam's"], ['olive oil', "Sam's"], ['lemon', "Sam's"],
-  ['turkey', 'Meijer'], ['butter', 'Meijer'], ['stuffing bread', 'Meijer'], ['pecan', 'Meijer'], ['cream style corn', 'Meijer'], ['jiffy', 'Meijer'], ['cream', 'Meijer'],
+  ['brussel', 'HEB'], ['parsley', 'HEB'], ['thyme', 'HEB'], ['celery', 'HEB'], ['carrot', 'HEB'], ['parsnip', 'HEB'],
+  ['rosemary', 'HEB'], ['mint', 'HEB'], ['chive', 'HEB'], ['dill', 'HEB'], ['shallot', 'HEB'], ['sweet potato', 'HEB'], ['cranberr', 'HEB'],
+  ['ground sage', 'Other'], ['bay leaf', 'Other'], ['cinnamon', 'Other'], ['salt', 'Other'], ['pepper', 'Other'], ['pumpkin pie spice', 'Other'],
+  ['pumpkin', 'Other'], ['condensed milk', 'Other'], ['coffee', 'Other'], ['nutmeg', 'Other'], ['ground ginger', 'Other'], ['paprika', 'Other'], ['vanilla', 'Other'],
+  ['brown sugar', 'Costco'], ['chicken stock', 'Costco'], ['onion', 'Costco'], ['apple', 'Costco'], ['egg', 'Costco'], ['sour cream', 'Costco'], ['potato', 'Costco'],
+  ['green bean', 'Costco'], ["french's", 'Costco'], ['olive oil', 'Costco'], ['lemon', 'Costco'],
+  ['turkey', 'HEB'], ['butter', 'HEB'], ['stuffing bread', 'HEB'], ['pecan', 'HEB'], ['cream style corn', 'HEB'], ['jiffy', 'HEB'], ['cream', 'HEB'],
 ]
 
 export function guessStore(name: string): string {
   const n = name.toLowerCase()
-  if (n.includes('stuffing') && n.includes('sage')) return 'Fruit Mkt'
+  if (n.includes('stuffing') && n.includes('sage')) return 'HEB'
   for (const [k, s] of STORE_RULES) if (n.includes(k)) return s
-  return 'Meijer'
+  return 'HEB'
 }
 
 const UNIT_ALIASES: Record<string, string> = {
