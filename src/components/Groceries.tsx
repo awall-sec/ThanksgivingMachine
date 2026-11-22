@@ -20,7 +20,7 @@ export function Groceries() {
   const [qty, setQty] = useState('')
   const [store, setStore] = useState<string>('Meijer')
 
-  const unpicked = db.dishes.filter((d) => !d.chosen_recipe_id && db.recipes.some((r) => r.dish_id === d.id))
+  const unpicked = [...db.dishes].sort((a, b) => a.sort - b.sort).filter((d) => !d.chosen_recipe_id && db.recipes.some((r) => r.dish_id === d.id))
   const done = lines.filter((l) => l.checked).length
 
   const toggle = (l: GroceryLine) => {
