@@ -1,6 +1,8 @@
 import { useMemo, useState } from 'react'
 import { useDB } from '../lib/db'
-import { buildGroceries, STORES, type GroceryLine } from '../lib/grocery'
+import { buildGroceries, SECTIONS, STORES, type GroceryLine } from '../lib/grocery'
+
+const SECTION_EMOJI: Record<string, string> = { Meat: '🍗', Vegetables: '🥕', Other: '🥫' }
 import { uid } from '../lib/format'
 import { confetti } from './confetti'
 
@@ -94,8 +96,14 @@ export function Groceries() {
                 <h3>{STORE_STYLE[s].emoji} {s}</h3>
                 <span className="pill">{left ? `${left} left` : 'All done! 🎉'}</span>
               </header>
+              {SECTIONS.map((sec) => {
+                const secItems = shown.filter((l) => l.section === sec)
+                if (!secItems.length) return null
+                return (
+                <div key={sec} className="gsection">
+                <h4 className="gsec-title">{SECTION_EMOJI[sec]} {sec} <span className="muted">({secItems.filter((l) => !l.checked).length} left)</span></h4>
               <ul className="glist">
-                {shown.map((l) => (
+                {secItems.map((l) => (
                   <li key={l.key} className={l.checked ? 'checked' : ''}>
                     <button className="check" onClick={() => toggle(l)} aria-label={`${l.checked ? 'Uncheck' : 'Check'} ${l.name}`}>{l.checked ? '✓' : ''}</button>
                     <div className="gtext" onClick={() => toggle(l)}>
@@ -110,6 +118,9 @@ export function Groceries() {
                   </li>
                 ))}
               </ul>
+                </div>
+                )
+              })}
             </section>
           )
         })}

@@ -379,13 +379,30 @@ function DishCard({ dish, options }: { dish: Dish; options: Recipe[] }) {
   const { upsert } = useDB()
   const [need, setNeed] = useState<{ recipe: Recipe; initial: Set<string> } | null>(null)
   const onPicked: OnPicked = (recipe, initial) => setNeed({ recipe, initial })
+  const [quickName, setQuickName] = useState('')
+  // A name-only recipe: no ingredients or steps yet (fill them in later with Edit). It becomes the pick.
+  const addByName = (e: React.FormEvent) => {
+    e.preventDefault()
+    const title = quickName.trim()
+    if (!title) return
+    const id = `${dish.id}-own-${Date.now().toString(36)}`
+    upsert('recipes', {
+      id, dish_id: dish.id, title, badge: 'Just a name', description: null, serves: null, prep_min: null, cook_min: null,
+      equipment: null, temp_f: null, ingredients: [], steps: [], tasks: [], skip_keys: [], source_url: null,
+      sort: Math.max(0, ...options.map((o) => o.sort)) + 1,
+    })
+    upsert('dishes', { id: dish.id, chosen_recipe_id: id })
+    confetti(24)
+    setQuickName('')
+  }
   const removeDish = () => {
     if (window.confirm(`Take ${dish.name} off the menu? Its steps and groceries disappear. You can bring it back from "Removed dishes" at the bottom.`)) {
       upsert('dishes', { id: dish.id, removed: true })
     }
   }
   const chosen = options.find((r) => r.id === dish.chosen_recipe_id)
-  const [open, setOpen] = useState(!chosen && options.length > 0)
+  // Brand-new dishes (no recipes, no note) open straight to the add-a-recipe card.
+  const [open, setOpen] = useState(!chosen && (options.length > 0 || !dish.notes))
   const [adding, setAdding] = useState(false)
   const [who, setWho] = useState(dish.who ?? '')
   return (
@@ -423,11 +440,20 @@ function DishCard({ dish, options }: { dish: Dish; options: Recipe[] }) {
       {open && (
         <div className="options">
           {options.map((r) => <OptionCard key={r.id} recipe={r} dish={dish} picked={r.id === dish.chosen_recipe_id} onPicked={onPicked} />)}
-          <button className="add-recipe card" onClick={() => setAdding(true)}>
-            <span className="add-plus">＋</span>
-            <b>Add a recipe</b>
-            <span className="muted small">Paste a link or the recipe text</span>
-          </button>
+          <div className="add-recipe card">
+            <button className="add-big" onClick={() => setAdding(true)}>
+              <span className="add-plus">＋</span>
+              <b>Add a recipe</b>
+              <span className="muted small">Paste a link or the recipe text</span>
+            </button>
+            <form className="quick-name" onSubmit={addByName}>
+              <span className="muted small">…or just add a name</span>
+              <div className="row">
+                <input value={quickName} onChange={(e) => setQuickName(e.target.value)} placeholder="e.g. Grandma's stuffing" aria-label={`Recipe name for ${dish.name}`} />
+                <button className="btn" disabled={!quickName.trim()}>Add</button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
       {adding && <AddRecipeModal dish={dish} nextSort={Math.max(0, ...options.map((o) => o.sort)) + 1} onClose={() => setAdding(false)} onPicked={onPicked} />}
@@ -452,6 +478,23 @@ export function Recipes() {
   const dishes = [...active].sort((a, b) => a.sort - b.sort).filter((d) =>
     filter === 'all' ? true : filter === 'todo' ? byDish.has(d.id) && !d.chosen_recipe_id : !!d.chosen_recipe_id,
   )
+  const [newName, setNewName] = useState('')
+  const [newCat, setNewCat] = useState('side')
+  const [newWho, setNewWho] = useState('')
+  const addDish = (e: React.FormEvent) => {
+    e.preventDefault()
+    const name = newName.trim()
+    if (!name) return
+    const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 30) || 'dish'
+    upsert('dishes', {
+      id: `${slug}-${Date.now().toString(36)}`, name, who: newWho.trim() || null, category: newCat,
+      sort: Math.max(0, ...db.dishes.map((d) => d.sort)) + 1, chosen_recipe_id: null, notes: null, removed: false,
+    })
+    confetti(24)
+    setNewName('')
+    setNewWho('')
+    setFilter('all')
+  }
   return (
     <div className="page">
       <div className="card hero-mini">
@@ -471,6 +514,18 @@ export function Recipes() {
           ))}
         </div>
       </div>
+      <form className="card add-dish" onSubmit={addDish}>
+        <h3>➕ Add a dish to the menu</h3>
+        <div className="row">
+          <input className="grow" value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Dish name (e.g. Mac & Cheese)" aria-label="New dish name" />
+          <select value={newCat} onChange={(e) => setNewCat(e.target.value)} aria-label="Course">
+            {CATEGORIES.map(([c, l]) => <option key={c} value={c}>{l}</option>)}
+          </select>
+          <input className="who-in" value={newWho} onChange={(e) => setNewWho(e.target.value)} placeholder="Who's cooking?" aria-label="Who's cooking the new dish" />
+          <button className="btn primary" disabled={!newName.trim()}>Add dish</button>
+        </div>
+        <p className="muted small">Then open it to add a recipe from a link, pasted text, or just a name.</p>
+      </form>
       {CATEGORIES.map(([cat, label]) => {
         const list = dishes.filter((d) => d.category === cat)
         if (!list.length) return null

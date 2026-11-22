@@ -14,6 +14,23 @@ const STORE_RULES: [string, string][] = [
   ['turkey', 'HEB'], ['butter', 'HEB'], ['stuffing bread', 'HEB'], ['pecan', 'HEB'], ['cream style corn', 'HEB'], ['jiffy', 'HEB'], ['cream', 'HEB'],
 ]
 
+export const SECTIONS = ['Meat', 'Vegetables', 'Other'] as const
+export type Section = (typeof SECTIONS)[number]
+
+// Pantry forms of meat/produce words (stock, powder, canned, dried...) belong in Other.
+const PANTRY = /\b(stock|broth|bouillon|soup|powder|dried|ground|can|cans|canned|jam|jelly|sauce|juice|mix|muffin|fried onion|cream style|puree|pur\u00e9e|condensed|seasoning|extract|syrup|chips?|crackers?|bread|cubes|marshmallow|pie crust|sugar|flour|oil|vinegar|mustard|mayo|spice|peppercorns?|black pepper|white pepper|cayenne|allspice|relish|cider|drippings|cornstarch|starch)/
+const MEAT = /\b(turkey|ham|bacon|sausage|chicken|beef|pork|wings?|giblets?|prosciutto|pancetta|chorizo|tamales?|shrimp|salmon|fish)\b/
+const VEG = /\b(potato|potatoes|sweet potato|yam|carrot|parsnip|onion|shallot|garlic|celery|green bean|bean|brussel|sprout|pea|peas|corn|mushroom|jalape\u00f1o|jalapeno|pepper|squash|pumpkin|spinach|kale|lettuce|salad|greens|cabbage|broccoli|cauliflower|asparagus|leek|herb|parsley|thyme|rosemary|sage|mint|chive|dill|basil|cilantro|cranberr|lingonberr|apple|lemon|lime|orange|pear|berries|grape|fruit|avocado|tomato|cucumber|zucchini|ginger)/
+
+export function guessSection(name: string): Section {
+  const n = name.toLowerCase()
+  if (PANTRY.test(n) && !/\bfresh\b/.test(n)) return 'Other'
+  if (/^(pepper|pumpkin)$/.test(n.trim())) return 'Other' // ground pepper, canned pumpkin
+  if (MEAT.test(n)) return 'Meat'
+  if (VEG.test(n)) return 'Vegetables'
+  return 'Other'
+}
+
 export function guessStore(name: string): string {
   const n = name.toLowerCase()
   if (n.includes('stuffing') && n.includes('sage')) return 'HEB'
@@ -60,6 +77,7 @@ export interface GroceryLine {
   qty: string
   dishes: string[]
   store: string
+  section: Section
   checked: boolean
   hidden: boolean
   extraId?: string
@@ -113,12 +131,13 @@ export function buildGroceries(db: DB): GroceryLine[] {
       qty: a.vagueOnly ? 'as needed' : parts.join(' + '),
       dishes: [...a.dishes].sort(),
       store: s?.store ?? guessStore(key),
+      section: guessSection(a.name),
       checked: s?.checked ?? false,
       hidden: s?.hidden ?? false,
     })
   }
   for (const x of db.grocery_extras) {
-    lines.push({ key: `extra:${x.id}`, name: x.name, qty: x.qty ?? '', dishes: [], store: x.store, checked: x.checked, hidden: false, extraId: x.id })
+    lines.push({ key: `extra:${x.id}`, name: x.name, qty: x.qty ?? '', dishes: [], store: x.store, section: guessSection(x.name), checked: x.checked, hidden: false, extraId: x.id })
   }
   return lines.sort((a, b) => a.name.localeCompare(b.name))
 }
