@@ -48,6 +48,7 @@ export interface Recipe {
   steps: string[]
   tasks: RecipeTask[]
   sort: number
+  source_url?: string | null
 }
 
 export interface Chore {

@@ -3,7 +3,7 @@
 The family's Thanksgiving food-prep app. One shared link, no logins, live sync between every phone and tablet.
 
 - **Prep dashboard**: countdown to dinner, a "do now" list, shared timers with a gobble alarm, and a day-by-day timeline with one lane per oven, stovetop, fryer, and so on. It warns you when two oven dishes need different temperatures at the same time.
-- **Recipes**: 3 options per dish (❤️ = family recipe from the sheet). The option you pick drives the schedule and the grocery list.
+- **Recipes**: 3 options per dish (❤️ = family recipe from the sheet), plus "Add a recipe" from a link or pasted text. The option you pick drives the schedule and the grocery list. Link import runs in the `import-recipe` Supabase Edge Function (`supabase/functions/`), which reads the page's schema.org Recipe data; sites that block automated readers fall back to pasting the text.
 - **Groceries**: built automatically from the picked recipes, with amounts added up across dishes and grouped by store (Costco, HEB, Other). Check items off live while you shop.
 
 All times are shown in **Central time** (`TZ` in `src/lib/format.ts`).

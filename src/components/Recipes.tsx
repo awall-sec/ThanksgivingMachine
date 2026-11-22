@@ -3,8 +3,9 @@ import { useDB } from '../lib/db'
 import { EQ } from '../lib/schedule'
 import { canonUnit } from '../lib/grocery'
 import { fmtMinutes, fmtQty } from '../lib/format'
-import type { Dish, Ingredient, Recipe } from '../types'
+import type { Dish, Eq, Ingredient, Recipe } from '../types'
 import { confetti } from './confetti'
+import { buildTasks, guessEquipment, importFromLink, parseRecipeText } from '../lib/importRecipe'
 
 const CATEGORIES: [string, string][] = [['main', '🦃 Mains'], ['prep', '🧂 Prep Work'], ['side', '🥔 Sides'], ['dessert', '🥧 Desserts']]
 
@@ -12,7 +13,7 @@ export function fmtIngredient(i: Ingredient): string {
   return [i.qty != null ? fmtQty(i.qty) : '', i.unit, i.item].filter(Boolean).join(' ')
 }
 
-const UNIT_WORDS = new Set(['cup', 'cups', 'tbsp', 'tsp', 'tablespoon', 'tablespoons', 'teaspoon', 'teaspoons', 'lb', 'lbs', 'oz', 'can', 'cans', 'box', 'boxes', 'gallon', 'gallons', 'clove', 'cloves', 'stalk', 'stalks', 'sprig', 'sprigs', 'slice', 'slices', 'jar', 'jars', 'package', 'packages', 'packet', 'packets', 'pound', 'pounds'])
+const UNIT_WORDS = new Set(['cup', 'cups', 'c', 'tbsp', 'tbs', 'tsp', 'tablespoon', 'tablespoons', 'teaspoon', 'teaspoons', 'lb', 'lbs', 'oz', 'ounce', 'ounces', 'can', 'cans', 'box', 'boxes', 'gallon', 'gallons', 'quart', 'quarts', 'pint', 'pints', 'clove', 'cloves', 'stalk', 'stalks', 'sprig', 'sprigs', 'slice', 'slices', 'jar', 'jars', 'package', 'packages', 'packet', 'packets', 'pound', 'pounds', 'stick', 'sticks', 'bunch', 'bunches', 'bag', 'bags', 'pinch', 'dash', 'g', 'kg', 'ml', 'l'])
 const UNICODE_FRAC: Record<string, number> = { '½': 0.5, '¼': 0.25, '¾': 0.75, '⅓': 0.33, '⅔': 0.67, '⅛': 0.125 }
 
 function parseQty(s: string): number | null {
@@ -86,9 +87,156 @@ function EditModal({ recipe, onClose }: { recipe: Recipe; onClose: () => void })
   )
 }
 
-function OptionCard({ recipe, dish, picked }: { recipe: Recipe; dish: Dish; picked: boolean }) {
+const EQ_CHOICES: Eq[] = ['oven', 'stove', 'fryer', 'microwave', 'counter', 'fridge']
+
+function AddRecipeModal({ dish, nextSort, onClose }: { dish: Dish; nextSort: number; onClose: () => void }) {
   const { upsert } = useDB()
+  const [url, setUrl] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState<{ kind: 'ok' | 'bad'; text: string } | null>(null)
+  const [showPaste, setShowPaste] = useState(false)
+  const [paste, setPaste] = useState('')
+  const [title, setTitle] = useState('')
+  const [description, setDescription] = useState('')
+  const [serves, setServes] = useState('')
+  const [prep, setPrep] = useState('15')
+  const [cook, setCook] = useState('30')
+  const [eq, setEq] = useState<Eq>('oven')
+  const [temp, setTemp] = useState('350')
+  const [when, setWhen] = useState<'day' | 'before'>(dish.category === 'dessert' ? 'before' : 'day')
+  const [ing, setIng] = useState('')
+  const [steps, setSteps] = useState('')
+  const [pickIt, setPickIt] = useState(true)
+
+  const fillFrom = (ingredients: string[], stepList: string[]) => {
+    if (ingredients.length) setIng(ingredients.join('\n'))
+    if (stepList.length) {
+      setSteps(stepList.join('\n'))
+      const g = guessEquipment(stepList)
+      setEq(g.eq)
+      if (g.temp) setTemp(String(g.temp))
+    }
+  }
+
+  const doImport = async () => {
+    if (!url.trim()) return
+    setBusy(true)
+    setMsg(null)
+    try {
+      const r = await importFromLink(url.trim())
+      setTitle(r.title || title)
+      setDescription(r.description || '')
+      setServes(r.serves || '')
+      if (r.prep_min != null) setPrep(String(r.prep_min))
+      if (r.cook_min != null) setCook(String(r.cook_min))
+      fillFrom(r.ingredients, r.steps)
+      setMsg({ kind: 'ok', text: `Imported ${r.ingredients.length} ingredients and ${r.steps.length} steps. Check the timing below, then save.` })
+    } catch (e) {
+      setMsg({ kind: 'bad', text: (e as Error).message })
+      setShowPaste(true)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const doPaste = () => {
+    const r = parseRecipeText(paste)
+    if (r.title && !title) setTitle(r.title)
+    fillFrom(r.ingredients, r.steps)
+    setMsg({ kind: r.ingredients.length || r.steps.length ? 'ok' : 'bad', text: r.ingredients.length || r.steps.length ? `Found ${r.ingredients.length} ingredients and ${r.steps.length} steps. Tidy up below if needed.` : "Couldn't spot ingredients or steps — type them below." })
+  }
+
+  const save = () => {
+    const prepN = Math.max(0, Math.round(Number(prep) || 0))
+    const cookN = Math.max(0, Math.round(Number(cook) || 0))
+    const tempN = eq === 'oven' ? Number(temp) || null : null
+    const id = `${dish.id}-own-${Date.now().toString(36)}`
+    const stepList = steps.split('\n').map((l) => l.trim()).filter(Boolean)
+    upsert('recipes', {
+      id,
+      dish_id: dish.id,
+      title: title.trim() || `Our ${dish.name}`,
+      badge: url.trim() ? 'From a link' : 'Family added',
+      description: description.trim() || null,
+      serves: serves.trim() || null,
+      prep_min: prepN,
+      cook_min: cookN,
+      equipment: eq,
+      temp_f: tempN,
+      ingredients: ing.split('\n').map((l) => l.trim()).filter(Boolean).map(parseIngredient),
+      steps: stepList,
+      tasks: buildTasks(dish.name, prepN, cookN, eq, tempN, when),
+      sort: nextSort,
+      source_url: url.trim() || null,
+    })
+    if (pickIt) {
+      upsert('dishes', { id: dish.id, chosen_recipe_id: id })
+      confetti(24)
+    }
+    onClose()
+  }
+
+  return (
+    <div className="modal-back" onClick={onClose}>
+      <div className="modal card" onClick={(e) => e.stopPropagation()} role="dialog" aria-label={`Add a recipe for ${dish.name}`}>
+        <h2>🔗 Add a recipe for {dish.name}</h2>
+        <label>
+          Recipe link
+          <div className="row">
+            <input style={{ flex: 1 }} type="url" placeholder="https://… paste the recipe page link" value={url} onChange={(e) => setUrl(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && doImport()} />
+            <button className="btn primary" onClick={doImport} disabled={busy || !url.trim()}>{busy ? 'Reading…' : 'Import'}</button>
+          </div>
+        </label>
+        {msg && <div className={`notice ${msg.kind === 'bad' ? 'bad' : ''}`}>{msg.kind === 'ok' ? '✅' : '😬'} {msg.text}</div>}
+        {!showPaste ? (
+          <button className="link" onClick={() => setShowPaste(true)}>Site won't import? Paste the recipe text instead →</button>
+        ) : (
+          <label>
+            Paste the recipe text <small>(copy the ingredients and directions from the page — the link above is kept for "View original")</small>
+            <textarea rows={6} value={paste} onChange={(e) => setPaste(e.target.value)} placeholder={'Ingredients\n2 lb green beans\n...\nInstructions\n1. Preheat oven to 350°F...'} />
+            <div className="row"><button className="btn" onClick={doPaste} disabled={!paste.trim()}>Fill in from text</button></div>
+          </label>
+        )}
+        <hr className="divider" />
+        <label>Title<input value={title} onChange={(e) => setTitle(e.target.value)} placeholder={`Our ${dish.name}`} /></label>
+        <div className="form-grid">
+          <label>Serves<input value={serves} onChange={(e) => setServes(e.target.value)} placeholder="8" /></label>
+          <label>Prep (min)<input type="number" min="0" value={prep} onChange={(e) => setPrep(e.target.value)} /></label>
+          <label>Cook (min)<input type="number" min="0" value={cook} onChange={(e) => setCook(e.target.value)} /></label>
+          <label>Cooks in
+            <select value={eq} onChange={(e) => setEq(e.target.value as Eq)}>
+              {EQ_CHOICES.map((x) => <option key={x} value={x}>{EQ[x].emoji} {EQ[x].label}</option>)}
+            </select>
+          </label>
+          {eq === 'oven' && <label>Oven °F<input type="number" min="150" max="550" value={temp} onChange={(e) => setTemp(e.target.value)} /></label>}
+          <label>When
+            <select value={when} onChange={(e) => setWhen(e.target.value as 'day' | 'before')}>
+              <option value="day">Thursday — ready at dinner</option>
+              <option value="before">Wednesday — make ahead</option>
+            </select>
+          </label>
+        </div>
+        <label>Ingredients <small>(one per line — these feed the grocery list)</small><textarea rows={7} value={ing} onChange={(e) => setIng(e.target.value)} /></label>
+        <label>Steps <small>(one per line)</small><textarea rows={6} value={steps} onChange={(e) => setSteps(e.target.value)} /></label>
+        <label className="toggle"><input type="checkbox" checked={pickIt} onChange={(e) => setPickIt(e.target.checked)} /> Make this our pick for {dish.name}</label>
+        <div className="row end">
+          <button className="btn ghost" onClick={onClose}>Cancel</button>
+          <button className="btn primary" onClick={save}>Save recipe</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function OptionCard({ recipe, dish, picked }: { recipe: Recipe; dish: Dish; picked: boolean }) {
+  const { upsert, remove } = useDB()
   const [editing, setEditing] = useState(false)
+  const added = recipe.id.includes('-own-')
+  const del = () => {
+    if (!window.confirm(`Remove "${recipe.title}" from ${dish.name}?`)) return
+    if (picked) upsert('dishes', { id: dish.id, chosen_recipe_id: null })
+    remove('recipes', recipe.id)
+  }
   const eq = recipe.equipment ? EQ[recipe.equipment] : null
   const pick = () => {
     upsert('dishes', { id: dish.id, chosen_recipe_id: picked ? null : recipe.id })
@@ -129,7 +277,9 @@ function OptionCard({ recipe, dish, picked }: { recipe: Recipe; dish: Dish; pick
       <div className="row option-actions">
         <button className={`btn ${picked ? 'good' : 'primary'}`} onClick={pick}>{picked ? '✓ Picked (tap to undo)' : 'Pick this one'}</button>
         <button className="btn ghost" onClick={() => setEditing(true)}>✏️ Edit</button>
+        {added && <button className="btn ghost" onClick={del} aria-label={`Remove ${recipe.title}`}>🗑</button>}
       </div>
+      {recipe.source_url && <a className="source-link" href={recipe.source_url} target="_blank" rel="noopener noreferrer">🔗 View original recipe</a>}
       {editing && <EditModal recipe={recipe} onClose={() => setEditing(false)} />}
     </div>
   )
@@ -139,10 +289,11 @@ function DishCard({ dish, options }: { dish: Dish; options: Recipe[] }) {
   const { upsert } = useDB()
   const chosen = options.find((r) => r.id === dish.chosen_recipe_id)
   const [open, setOpen] = useState(!chosen && options.length > 0)
+  const [adding, setAdding] = useState(false)
   const [who, setWho] = useState(dish.who ?? '')
   return (
     <section className={`dish card ${chosen ? 'has-pick' : options.length ? 'needs-pick' : ''}`}>
-      <header className="dish-head" onClick={() => options.length && setOpen(!open)}>
+      <header className="dish-head" onClick={() => setOpen(!open)}>
         <div>
           <h3>{dish.name}</h3>
           <div className="dish-sub">
@@ -159,13 +310,19 @@ function DishCard({ dish, options }: { dish: Dish; options: Recipe[] }) {
             aria-label={`Cook for ${dish.name}`}
           />
         </label>
-        {options.length > 0 && <span className={`chev ${open ? 'open' : ''}`}>▾</span>}
+        <span className={`chev ${open ? 'open' : ''}`}>▾</span>
       </header>
       {open && (
         <div className="options">
           {options.map((r) => <OptionCard key={r.id} recipe={r} dish={dish} picked={r.id === dish.chosen_recipe_id} />)}
+          <button className="add-recipe card" onClick={() => setAdding(true)}>
+            <span className="add-plus">＋</span>
+            <b>Add a recipe</b>
+            <span className="muted small">Paste a link or the recipe text</span>
+          </button>
         </div>
       )}
+      {adding && <AddRecipeModal dish={dish} nextSort={Math.max(0, ...options.map((o) => o.sort)) + 1} onClose={() => setAdding(false)} />}
     </section>
   )
 }

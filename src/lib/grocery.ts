@@ -33,15 +33,24 @@ export function canonUnit(u: string): string {
   return UNIT_ALIASES[x] ?? x
 }
 
+// Size/prep words that shouldn't split one grocery item into two ("large eggs" = "eggs").
+const NOISE = /^(large|medium|small|extra[- ]large|packed|fresh|freshly|chopped|minced|diced|softened|melted|cold|warm|unsalted|salted)\s+/
+
+function baseName(item: string): string {
+  let n = item.split(',')[0].replace(/\(.*?\)/g, '').replace(/\s+/g, ' ').trim()
+  while (NOISE.test(n.toLowerCase())) n = n.replace(/^\S+\s+/, '')
+  return n
+}
+
 export function itemKey(item: string): string {
-  let n = item.toLowerCase().split(',')[0].replace(/\(.*?\)/g, '').replace(/\s+/g, ' ').trim()
+  let n = baseName(item).toLowerCase()
   if (/(potato|tomato)es$/.test(n)) n = n.slice(0, -2)
   else if (/[^s]s$/.test(n) && !/(molasses|brussels)$/.test(n)) n = n.slice(0, -1)
   return n
 }
 
 function displayName(item: string): string {
-  const n = item.split(',')[0].trim()
+  const n = baseName(item)
   return n.charAt(0).toUpperCase() + n.slice(1)
 }
 
@@ -88,7 +97,10 @@ export function buildGroceries(db: DB): GroceryLine[] {
     for (const [u, amt] of a.units) {
       if (u === 'vol') {
         // Butter shoppers think in sticks.
-        parts.push(key === 'butter' ? `${fmtQty(Math.ceil((amt / 24) * 2) / 2)} sticks` : fmtVolume(amt))
+        {
+          const sticks = Math.ceil((amt / 24) * 2) / 2
+          parts.push(key === 'butter' ? `${fmtQty(sticks)} stick${sticks > 1 ? 's' : ''}` : fmtVolume(amt))
+        }
       } else if (u === '') parts.push(`${fmtQty(amt)}`)
       else parts.push(`${fmtQty(amt)} ${amt > 1 ? PLURAL[u] ?? u : u}`)
     }
