@@ -16,6 +16,7 @@ export interface Dish {
   sort: number
   chosen_recipe_id: string | null
   notes: string | null
+  removed?: boolean
 }
 
 export interface Ingredient {
@@ -49,6 +50,8 @@ export interface Recipe {
   tasks: RecipeTask[]
   sort: number
   source_url?: string | null
+  /** Ingredient keys the family already has, so they stay off the grocery list. */
+  skip_keys?: string[]
 }
 
 export interface Chore {
@@ -73,6 +76,7 @@ export interface GroceryState {
   item_key: string
   checked: boolean
   store: string | null
+  hidden?: boolean
   updated_at?: string
 }
 

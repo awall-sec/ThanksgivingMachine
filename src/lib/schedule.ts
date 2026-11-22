@@ -42,7 +42,7 @@ export function buildSchedule(db: DB): SchedItem[] {
     const start = new Date(dinner + (at + shift) * 60000)
     out.push({ ...base, key, start, end: new Date(start.getTime() + base.dur * 60000), done: s?.done ?? false, shift })
   }
-  for (const dish of db.dishes) {
+  for (const dish of db.dishes.filter((d) => !d.removed)) {
     const r = dish.chosen_recipe_id ? recipes.get(dish.chosen_recipe_id) : undefined
     if (!r) continue
     for (const t of r.tasks ?? []) {

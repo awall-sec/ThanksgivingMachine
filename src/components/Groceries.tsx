@@ -12,13 +12,15 @@ const STORE_STYLE: Record<string, { emoji: string; cls: string }> = {
 
 export function Groceries() {
   const { db, upsert, remove } = useDB()
-  const lines = useMemo(() => buildGroceries(db), [db])
+  const allLines = useMemo(() => buildGroceries(db), [db])
+  const lines = allLines.filter((l) => !l.hidden)
+  const hiddenLines = allLines.filter((l) => l.hidden)
   const [hideChecked, setHideChecked] = useState(false)
   const [name, setName] = useState('')
   const [qty, setQty] = useState('')
   const [store, setStore] = useState<string>('HEB')
 
-  const unpicked = [...db.dishes].sort((a, b) => a.sort - b.sort).filter((d) => !d.chosen_recipe_id && db.recipes.some((r) => r.dish_id === d.id))
+  const unpicked = [...db.dishes].sort((a, b) => a.sort - b.sort).filter((d) => !d.removed && !d.chosen_recipe_id && db.recipes.some((r) => r.dish_id === d.id))
   const done = lines.filter((l) => l.checked).length
 
   const toggle = (l: GroceryLine) => {
@@ -34,6 +36,12 @@ export function Groceries() {
     if (l.extraId) upsert('grocery_extras', { id: l.extraId, store: s })
     else upsert('grocery_state', { item_key: l.key, checked: l.checked, store: s, updated_at: new Date().toISOString() })
   }
+  // Extras you typed in are deleted; recipe items are hidden so they can be put back.
+  const drop = (l: GroceryLine) => {
+    if (l.extraId) remove('grocery_extras', l.extraId)
+    else upsert('grocery_state', { item_key: l.key, checked: l.checked, store: l.store, hidden: true, updated_at: new Date().toISOString() })
+  }
+  const restore = (l: GroceryLine) => upsert('grocery_state', { item_key: l.key, hidden: false, updated_at: new Date().toISOString() })
   const addItem = (e: React.FormEvent) => {
     e.preventDefault()
     if (!name.trim()) return
@@ -98,7 +106,7 @@ export function Groceries() {
                     <select className="gstore" value={l.store} onChange={(e) => move(l, e.target.value)} aria-label={`Store for ${l.name}`}>
                       {STORES.map((x) => <option key={x}>{x}</option>)}
                     </select>
-                    {l.extraId && <button className="x" onClick={() => remove('grocery_extras', l.extraId!)} aria-label={`Remove ${l.name}`}>✕</button>}
+                    <button className="x" onClick={() => drop(l)} aria-label={`Remove ${l.name}`} title="Remove from list">✕</button>
                   </li>
                 ))}
               </ul>
@@ -106,6 +114,20 @@ export function Groceries() {
           )
         })}
       </div>
+
+      {hiddenLines.length > 0 && (
+        <details className="card removed">
+          <summary>🙈 Removed items ({hiddenLines.length})</summary>
+          <ul className="removed-list">
+            {hiddenLines.map((l) => (
+              <li key={l.key}>
+                <span><b>{l.name}</b>{l.qty && <span className="muted"> · {l.qty}</span>}</span>
+                <button className="chip-btn" onClick={() => restore(l)}>↩ Put back</button>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
     </div>
   )
 }

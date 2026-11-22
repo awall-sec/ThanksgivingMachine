@@ -61,6 +61,7 @@ export interface GroceryLine {
   dishes: string[]
   store: string
   checked: boolean
+  hidden: boolean
   extraId?: string
 }
 
@@ -74,12 +75,13 @@ export function buildGroceries(db: DB): GroceryLine[] {
   const recipes = new Map(db.recipes.map((r) => [r.id, r]))
   const state = new Map(db.grocery_state.map((s) => [s.item_key, s]))
   const agg = new Map<string, { name: string; units: Map<string, number>; vagueOnly: boolean; dishes: Set<string> }>()
-  for (const dish of db.dishes) {
+  for (const dish of db.dishes.filter((d) => !d.removed)) {
     const r = dish.chosen_recipe_id ? recipes.get(dish.chosen_recipe_id) : undefined
     if (!r) continue
+    const skip = new Set(r.skip_keys ?? [])
     for (const ing of r.ingredients ?? []) {
       const key = itemKey(ing.item)
-      if (!key) continue
+      if (!key || skip.has(key)) continue
       let a = agg.get(key)
       if (!a) agg.set(key, (a = { name: displayName(ing.item), units: new Map(), vagueOnly: true, dishes: new Set() }))
       a.dishes.add(dish.name)
@@ -112,10 +114,11 @@ export function buildGroceries(db: DB): GroceryLine[] {
       dishes: [...a.dishes].sort(),
       store: s?.store ?? guessStore(key),
       checked: s?.checked ?? false,
+      hidden: s?.hidden ?? false,
     })
   }
   for (const x of db.grocery_extras) {
-    lines.push({ key: `extra:${x.id}`, name: x.name, qty: x.qty ?? '', dishes: [], store: x.store, checked: x.checked, extraId: x.id })
+    lines.push({ key: `extra:${x.id}`, name: x.name, qty: x.qty ?? '', dishes: [], store: x.store, checked: x.checked, hidden: false, extraId: x.id })
   }
   return lines.sort((a, b) => a.name.localeCompare(b.name))
 }

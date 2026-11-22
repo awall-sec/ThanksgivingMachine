@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useDB } from '../lib/db'
 import { EQ } from '../lib/schedule'
-import { canonUnit } from '../lib/grocery'
+import { canonUnit, guessStore, itemKey } from '../lib/grocery'
 import { fmtMinutes, fmtQty } from '../lib/format'
 import type { Dish, Eq, Ingredient, Recipe } from '../types'
 import { confetti } from './confetti'
@@ -87,9 +87,81 @@ function EditModal({ recipe, onClose }: { recipe: Recipe; onClose: () => void })
   )
 }
 
+type OnPicked = (recipe: Recipe, initial: Set<string>) => void
+
+/** Unique grocery items in a recipe, keyed the same way the grocery list merges them. */
+function recipeItems(recipe: Pick<Recipe, 'ingredients'>) {
+  const seen = new Map<string, { key: string; label: string; store: string }>()
+  for (const i of recipe.ingredients ?? []) {
+    const key = itemKey(i.item)
+    if (key && !seen.has(key)) seen.set(key, { key, label: fmtIngredient(i), store: guessStore(key) })
+  }
+  return [...seen.values()]
+}
+
+function NeedPopup({ recipe, dish, initial, onClose }: { recipe: Recipe; dish: Dish; initial: Set<string>; onClose: () => void }) {
+  const { db, upsert } = useDB()
+  const items = useMemo(() => recipeItems(recipe), [recipe])
+  const [need, setNeed] = useState<Set<string>>(() => new Set(initial))
+  const toggle = (k: string) =>
+    setNeed((prev) => {
+      const n = new Set(prev)
+      if (n.has(k)) n.delete(k)
+      else n.add(k)
+      return n
+    })
+  const save = () => {
+    upsert('recipes', { id: recipe.id, skip_keys: items.filter((i) => !need.has(i.key)).map((i) => i.key) })
+    // Anything we need that was X'd off the list earlier comes back.
+    for (const k of need) {
+      const st = db.grocery_state.find((g) => g.item_key === k)
+      if (st?.hidden) upsert('grocery_state', { item_key: k, hidden: false, updated_at: new Date().toISOString() })
+    }
+    onClose()
+  }
+  return (
+    <div className="modal-back" onClick={onClose}>
+      <div className="modal card" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Choose groceries">
+        <h2>🛒 What do you need to buy?</h2>
+        <p className="muted">
+          For <b>{recipe.title}</b> ({dish.name}). Check only the things you <b>don&apos;t already have</b> — those go on the grocery list.
+        </p>
+        <div className="row">
+          <button className="chip-btn" onClick={() => setNeed(new Set(items.map((i) => i.key)))}>Check all</button>
+          <button className="chip-btn" onClick={() => setNeed(new Set())}>Clear</button>
+          <span className="muted small">{need.size} of {items.length} to buy</span>
+        </div>
+        <ul className="need-list">
+          {items.map((i) => (
+            <li key={i.key} className={need.has(i.key) ? 'on' : ''} onClick={() => toggle(i.key)}>
+              <button
+                className="check"
+                aria-label={(need.has(i.key) ? 'Do not buy ' : 'Buy ') + i.label}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  toggle(i.key)
+                }}
+              >
+                {need.has(i.key) ? '✓' : ''}
+              </button>
+              <span className="need-label">{i.label}</span>
+              <span className="chip">{i.store}</span>
+            </li>
+          ))}
+          {!items.length && <li className="muted">This recipe has no ingredients listed.</li>}
+        </ul>
+        <div className="row end">
+          <button className="btn ghost" onClick={onClose}>Not now</button>
+          <button className="btn primary" onClick={save}>{need.size ? `Add ${need.size} to grocery list` : 'I have everything'}</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 const EQ_CHOICES: Eq[] = ['oven', 'stove', 'fryer', 'microwave', 'counter', 'fridge']
 
-function AddRecipeModal({ dish, nextSort, onClose }: { dish: Dish; nextSort: number; onClose: () => void }) {
+function AddRecipeModal({ dish, nextSort, onClose, onPicked }: { dish: Dish; nextSort: number; onClose: () => void; onPicked: OnPicked }) {
   const { upsert } = useDB()
   const [url, setUrl] = useState('')
   const [busy, setBusy] = useState(false)
@@ -152,7 +224,10 @@ function AddRecipeModal({ dish, nextSort, onClose }: { dish: Dish; nextSort: num
     const tempN = eq === 'oven' ? Number(temp) || null : null
     const id = `${dish.id}-own-${Date.now().toString(36)}`
     const stepList = steps.split('\n').map((l) => l.trim()).filter(Boolean)
-    upsert('recipes', {
+    const ingredients = ing.split('\n').map((l) => l.trim()).filter(Boolean).map(parseIngredient)
+    // Nothing goes on the grocery list until the family says what they need.
+    const skip_keys = pickIt ? recipeItems({ ingredients }).map((i) => i.key) : []
+    const recipe: Recipe = {
       id,
       dish_id: dish.id,
       title: title.trim() || `Our ${dish.name}`,
@@ -163,17 +238,20 @@ function AddRecipeModal({ dish, nextSort, onClose }: { dish: Dish; nextSort: num
       cook_min: cookN,
       equipment: eq,
       temp_f: tempN,
-      ingredients: ing.split('\n').map((l) => l.trim()).filter(Boolean).map(parseIngredient),
+      ingredients,
       steps: stepList,
       tasks: buildTasks(dish.name, prepN, cookN, eq, tempN, when),
       sort: nextSort,
       source_url: url.trim() || null,
-    })
+      skip_keys,
+    }
+    upsert('recipes', recipe)
+    onClose()
     if (pickIt) {
       upsert('dishes', { id: dish.id, chosen_recipe_id: id })
       confetti(24)
+      onPicked(recipe, new Set())
     }
-    onClose()
   }
 
   return (
@@ -228,7 +306,7 @@ function AddRecipeModal({ dish, nextSort, onClose }: { dish: Dish; nextSort: num
   )
 }
 
-function OptionCard({ recipe, dish, picked }: { recipe: Recipe; dish: Dish; picked: boolean }) {
+function OptionCard({ recipe, dish, picked, onPicked }: { recipe: Recipe; dish: Dish; picked: boolean; onPicked: OnPicked }) {
   const { upsert, remove } = useDB()
   const [editing, setEditing] = useState(false)
   const added = recipe.id.includes('-own-')
@@ -238,9 +316,20 @@ function OptionCard({ recipe, dish, picked }: { recipe: Recipe; dish: Dish; pick
     remove('recipes', recipe.id)
   }
   const eq = recipe.equipment ? EQ[recipe.equipment] : null
+  const allKeys = () => recipeItems(recipe).map((i) => i.key)
   const pick = () => {
     upsert('dishes', { id: dish.id, chosen_recipe_id: picked ? null : recipe.id })
-    if (!picked) confetti(24)
+    if (picked) return
+    confetti(24)
+    // Start from what they said last time; otherwise nothing is on the list until they choose.
+    const prevSkip = recipe.skip_keys ?? []
+    const initial = prevSkip.length ? new Set(allKeys().filter((k) => !prevSkip.includes(k))) : new Set<string>()
+    if (!prevSkip.length) upsert('recipes', { id: recipe.id, skip_keys: allKeys() })
+    onPicked(recipe, initial)
+  }
+  const review = () => {
+    const skip = recipe.skip_keys ?? []
+    onPicked(recipe, new Set(allKeys().filter((k) => !skip.includes(k))))
   }
   return (
     <div className={`option card ${picked ? 'picked' : ''}`}>
@@ -277,6 +366,7 @@ function OptionCard({ recipe, dish, picked }: { recipe: Recipe; dish: Dish; pick
       <div className="row option-actions">
         <button className={`btn ${picked ? 'good' : 'primary'}`} onClick={pick}>{picked ? '✓ Picked (tap to undo)' : 'Pick this one'}</button>
         <button className="btn ghost" onClick={() => setEditing(true)}>✏️ Edit</button>
+        {picked && <button className="btn ghost" onClick={review} title="Choose which ingredients to buy" aria-label="Choose which ingredients to buy">🛒</button>}
         {added && <button className="btn ghost" onClick={del} aria-label={`Remove ${recipe.title}`}>🗑</button>}
       </div>
       {recipe.source_url && <a className="source-link" href={recipe.source_url} target="_blank" rel="noopener noreferrer">🔗 View original recipe</a>}
@@ -287,6 +377,13 @@ function OptionCard({ recipe, dish, picked }: { recipe: Recipe; dish: Dish; pick
 
 function DishCard({ dish, options }: { dish: Dish; options: Recipe[] }) {
   const { upsert } = useDB()
+  const [need, setNeed] = useState<{ recipe: Recipe; initial: Set<string> } | null>(null)
+  const onPicked: OnPicked = (recipe, initial) => setNeed({ recipe, initial })
+  const removeDish = () => {
+    if (window.confirm(`Take ${dish.name} off the menu? Its steps and groceries disappear. You can bring it back from "Removed dishes" at the bottom.`)) {
+      upsert('dishes', { id: dish.id, removed: true })
+    }
+  }
   const chosen = options.find((r) => r.id === dish.chosen_recipe_id)
   const [open, setOpen] = useState(!chosen && options.length > 0)
   const [adding, setAdding] = useState(false)
@@ -311,10 +408,21 @@ function DishCard({ dish, options }: { dish: Dish; options: Recipe[] }) {
           />
         </label>
         <span className={`chev ${open ? 'open' : ''}`}>▾</span>
+        <button
+          className="x dish-x"
+          onClick={(e) => {
+            e.stopPropagation()
+            removeDish()
+          }}
+          aria-label={`Remove ${dish.name} from the menu`}
+          title="Remove from menu"
+        >
+          ✕
+        </button>
       </header>
       {open && (
         <div className="options">
-          {options.map((r) => <OptionCard key={r.id} recipe={r} dish={dish} picked={r.id === dish.chosen_recipe_id} />)}
+          {options.map((r) => <OptionCard key={r.id} recipe={r} dish={dish} picked={r.id === dish.chosen_recipe_id} onPicked={onPicked} />)}
           <button className="add-recipe card" onClick={() => setAdding(true)}>
             <span className="add-plus">＋</span>
             <b>Add a recipe</b>
@@ -322,7 +430,8 @@ function DishCard({ dish, options }: { dish: Dish; options: Recipe[] }) {
           </button>
         </div>
       )}
-      {adding && <AddRecipeModal dish={dish} nextSort={Math.max(0, ...options.map((o) => o.sort)) + 1} onClose={() => setAdding(false)} />}
+      {adding && <AddRecipeModal dish={dish} nextSort={Math.max(0, ...options.map((o) => o.sort)) + 1} onClose={() => setAdding(false)} onPicked={onPicked} />}
+      {need && <NeedPopup recipe={need.recipe} dish={dish} initial={need.initial} onClose={() => setNeed(null)} />}
     </section>
   )
 }
@@ -335,9 +444,12 @@ export function Recipes() {
     for (const r of [...db.recipes].sort((a, b) => a.sort - b.sort)) m.set(r.dish_id, [...(m.get(r.dish_id) ?? []), r])
     return m
   }, [db.recipes])
-  const pickable = db.dishes.filter((d) => byDish.has(d.id))
+  const { upsert } = useDB()
+  const active = db.dishes.filter((d) => !d.removed)
+  const removedDishes = db.dishes.filter((d) => d.removed).sort((a, b) => a.sort - b.sort)
+  const pickable = active.filter((d) => byDish.has(d.id))
   const picked = pickable.filter((d) => d.chosen_recipe_id).length
-  const dishes = [...db.dishes].sort((a, b) => a.sort - b.sort).filter((d) =>
+  const dishes = [...active].sort((a, b) => a.sort - b.sort).filter((d) =>
     filter === 'all' ? true : filter === 'todo' ? byDish.has(d.id) && !d.chosen_recipe_id : !!d.chosen_recipe_id,
   )
   return (
@@ -370,6 +482,19 @@ export function Recipes() {
         )
       })}
       {!dishes.length && <p className="empty">Nothing here — nice work! 🎉</p>}
+      {removedDishes.length > 0 && (
+        <details className="card removed">
+          <summary>🙈 Removed dishes ({removedDishes.length})</summary>
+          <ul className="removed-list">
+            {removedDishes.map((d) => (
+              <li key={d.id}>
+                <span>{d.name}</span>
+                <button className="chip-btn" onClick={() => upsert('dishes', { id: d.id, removed: false })}>↩ Put back</button>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
     </div>
   )
 }

@@ -126,7 +126,7 @@ export function Dashboard() {
   const clash = useMemo(() => new Set(conflicts.flatMap((c) => [c.a.key, c.b.key])), [conflicts])
   const dinner = dinnerTime(db)
   const [editDinner, setEditDinner] = useState(false)
-  const unpicked = [...db.dishes].sort((a, b) => a.sort - b.sort).filter((d) => !d.chosen_recipe_id && db.recipes.some((r) => r.dish_id === d.id))
+  const unpicked = [...db.dishes].sort((a, b) => a.sort - b.sort).filter((d) => !d.removed && !d.chosen_recipe_id && db.recipes.some((r) => r.dish_id === d.id))
 
   const days = useMemo(() => {
     const m = new Map<string, { key: string; date: Date; items: SchedItem[] }>()

@@ -268,6 +268,16 @@ summary { cursor: pointer; font-weight: 800; color: var(--orange-dark); }
 .option-actions { margin-top: 6px; }
 .option-actions .btn:first-child { flex: 1; }
 
+.need-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; max-height: 46vh; overflow-y: auto; }
+.need-list li { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 2.5px solid #e5d3b8; border-radius: 14px; background: #fff; cursor: pointer; }
+.need-list li.on { border-color: var(--leaf-dark); background: #eef8e6; }
+.need-list li.on .check { background: var(--leaf); }
+.need-label { flex: 1; font-weight: 700; }
+.dish-x { font-size: 1.2rem; padding: 4px 6px; }
+.removed summary { font-family: 'Fredoka'; font-size: 1.05rem; }
+.removed-list { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.removed-list li { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 4px; border-bottom: 2px dashed #f0e2cc; }
+.removed-list li:last-child { border-bottom: none; }
 .add-recipe {
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; min-height: 160px;
   border-style: dashed; box-shadow: none; background: transparent; cursor: pointer; color: var(--ink); font: inherit;
