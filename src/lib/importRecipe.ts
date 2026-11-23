@@ -62,13 +62,17 @@ export function guessEquipment(steps: string[]): { eq: Eq; temp: number | null }
   const text = steps.join(' ').toLowerCase()
   const t = text.match(/(\d{3})\s*°?\s*(?:degrees\s*)?f\b/) ?? text.match(/(\d{3})\s*°/)
   const temp = t ? Number(t[1]) : null
+  if (/\b(smoker|smoked|smoke|smoking|pellet grill)\b/.test(text)) {
+    const st = text.match(/\b(2\d{2})\s*°?\s*(?:degrees\s*)?f?\b/)
+    return { eq: 'smoker', temp: st ? Number(st[1]) : 250 }
+  }
   if (/\b(oven|bake|baking|roast)\b/.test(text) || (temp && temp >= 250 && temp <= 550)) return { eq: 'oven', temp: temp && temp >= 200 && temp <= 550 ? temp : 350 }
   if (/\b(simmer|boil|skillet|saucepan|stovetop|saut[eé]|pot over)\b/.test(text)) return { eq: 'stove', temp: null }
   if (/\b(refrigerat|chill)\b/.test(text)) return { eq: 'fridge', temp: null }
   return { eq: 'counter', temp: null }
 }
 
-const VERB: Record<Eq, string> = { oven: 'Bake', stove: 'Cook', fryer: 'Fry', fridge: 'Chill', counter: 'Make', microwave: 'Microwave' }
+const VERB: Record<Eq, string> = { oven: 'Bake', stove: 'Cook', fryer: 'Fry', smoker: 'Smoke', fridge: 'Chill', counter: 'Make', microwave: 'Microwave' }
 
 /** Day-of: ready 10 min before dinner. Day before: done Wednesday 3 PM (23 h before a 2 PM dinner). */
 export function buildTasks(name: string, prep: number, cook: number, eq: Eq, temp: number | null, when: 'day' | 'before'): RecipeTask[] {
@@ -77,6 +81,6 @@ export function buildTasks(name: string, prep: number, cook: number, eq: Eq, tem
   if (!prep && !cook) return [{ id: 'make', label: `Make ${name}`, at: end - 30, dur: 30, eq: 'counter', temp: null }]
   const cookStart = end - cook
   if (prep) tasks.push({ id: 'prep', label: `Prep ${name}`, at: cookStart - prep, dur: prep, eq: 'counter', temp: null })
-  if (cook) tasks.push({ id: 'cook', label: `${VERB[eq]} ${name}`, at: cookStart, dur: cook, eq, temp: eq === 'oven' ? temp : null })
+  if (cook) tasks.push({ id: 'cook', label: `${VERB[eq]} ${name}`, at: cookStart, dur: cook, eq, temp: eq === 'oven' || eq === 'smoker' ? temp : null })
   return tasks
 }

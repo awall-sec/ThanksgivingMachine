@@ -123,7 +123,7 @@ export function Dashboard() {
   const now = useNow(1000)
   const items = useMemo(() => buildSchedule(db), [db])
   const conflicts = useMemo(() => findConflicts(items), [items])
-  const clash = useMemo(() => new Set(conflicts.flatMap((c) => [c.a.key, c.b.key])), [conflicts])
+  const clash = useMemo(() => new Set(conflicts.flatMap((c) => (c.all ?? [c.a, c.b]).map((i) => i.key))), [conflicts])
   const dinner = dinnerTime(db)
   const [editDinner, setEditDinner] = useState(false)
   const unpicked = [...db.dishes].sort((a, b) => a.sort - b.sort).filter((d) => !d.removed && !d.chosen_recipe_id && db.recipes.some((r) => r.dish_id === d.id))
@@ -182,7 +182,13 @@ export function Dashboard() {
           <b>⚠️ Equipment clash{conflicts.length > 1 ? 'es' : ''}:</b>
           <ul>
             {conflicts.slice(0, 5).map((c, i) => (
-              <li key={i}>{c.reason}: <b>{c.a.label}</b> ({fmtTime(c.a.start)}) and <b>{c.b.label}</b> ({fmtTime(c.b.start)}). Nudge one with ±15.</li>
+              <li key={i}>
+                {c.reason}:{' '}
+                {(c.all ?? [c.a, c.b]).map((it, j, arr) => (
+                  <span key={it.key}><b>{it.label}</b> ({fmtTime(it.start)}){j < arr.length - 2 ? ', ' : j === arr.length - 2 ? ' and ' : ''}</span>
+                ))}
+                . Nudge one with ±15.
+              </li>
             ))}
           </ul>
         </div>

@@ -1,4 +1,4 @@
-export type Eq = 'fryer' | 'oven' | 'stove' | 'microwave' | 'counter' | 'fridge'
+export type Eq = 'fryer' | 'smoker' | 'oven' | 'stove' | 'microwave' | 'counter' | 'fridge'
 
 export interface Settings {
   id: number

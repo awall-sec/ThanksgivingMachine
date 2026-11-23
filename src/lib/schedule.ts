@@ -3,13 +3,14 @@ import { DEFAULT_DINNER, tzDayKey } from './format'
 
 export const EQ: Record<Eq, { label: string; emoji: string; color: string }> = {
   fryer: { label: 'Oil-less Fryer', emoji: '🦃', color: 'var(--c-fryer)' },
-  oven: { label: 'Oven', emoji: '🔥', color: 'var(--c-oven)' },
+  smoker: { label: 'Smoker', emoji: '💨', color: 'var(--c-smoker)' },
+  oven: { label: 'Oven (3 racks)', emoji: '🔥', color: 'var(--c-oven)' },
   stove: { label: 'Stovetop', emoji: '🍳', color: 'var(--c-stove)' },
   microwave: { label: 'Microwave', emoji: '⚡', color: 'var(--c-micro)' },
   counter: { label: 'Prep & Chores', emoji: '🔪', color: 'var(--c-counter)' },
   fridge: { label: 'Fridge', emoji: '🧊', color: 'var(--c-fridge)' },
 }
-export const LANE_ORDER: Eq[] = ['fryer', 'oven', 'stove', 'microwave', 'counter', 'fridge']
+export const LANE_ORDER: Eq[] = ['fryer', 'smoker', 'oven', 'stove', 'microwave', 'counter', 'fridge']
 
 export interface SchedItem {
   key: string
@@ -59,13 +60,19 @@ export interface Conflict {
   a: SchedItem
   b: SchedItem
   reason: string
+  /** Every dish involved, when more than two share the blame (oven racks). */
+  all?: SchedItem[]
 }
+
+export const OVEN_RACKS = 3
+// Preheating takes no rack space.
+const usesRack = (i: SchedItem) => !/preheat/i.test(i.label)
 
 export function findConflicts(items: SchedItem[]): Conflict[] {
   const out: Conflict[] = []
   const live = items.filter((i) => !i.done)
   const overlap = (a: SchedItem, b: SchedItem) => a.start < b.end && b.start < a.end
-  for (const eq of ['oven', 'fryer'] as Eq[]) {
+  for (const eq of ['oven', 'fryer', 'smoker'] as Eq[]) {
     const list = live.filter((i) => i.eq === eq)
     for (let i = 0; i < list.length; i++) {
       for (let j = i + 1; j < list.length; j++) {
@@ -73,9 +80,22 @@ export function findConflicts(items: SchedItem[]): Conflict[] {
         const b = list[j]
         if (!overlap(a, b)) continue
         if (eq === 'fryer' && a.recipe?.id !== b.recipe?.id) out.push({ a, b, reason: 'Only one fryer' })
-        if (eq === 'oven' && a.temp && b.temp && a.temp !== b.temp) out.push({ a, b, reason: `Oven at ${a.temp}°F and ${b.temp}°F at once` })
+        if ((eq === 'oven' || eq === 'smoker') && a.temp && b.temp && a.temp !== b.temp)
+          out.push({ a, b, reason: `${eq === 'oven' ? 'Oven' : 'Smoker'} at ${a.temp}°F and ${b.temp}°F at once` })
       }
     }
+  }
+  // Oven racks: at any moment, more than three dishes in the oven is a clash.
+  const racks = live.filter((i) => i.eq === 'oven' && usesRack(i))
+  const seen = new Set<string>()
+  for (const s of racks) {
+    const t = s.start
+    const inside = racks.filter((i) => i.start <= t && t < i.end)
+    if (inside.length <= OVEN_RACKS) continue
+    const sig = inside.map((i) => i.key).sort().join('|')
+    if (seen.has(sig)) continue
+    seen.add(sig)
+    out.unshift({ a: inside[0], b: inside[1], all: inside, reason: `${inside.length} dishes but only ${OVEN_RACKS} oven racks` })
   }
   return out
 }

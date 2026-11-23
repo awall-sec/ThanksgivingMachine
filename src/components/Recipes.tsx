@@ -159,7 +159,7 @@ function NeedPopup({ recipe, dish, initial, onClose }: { recipe: Recipe; dish: D
   )
 }
 
-const EQ_CHOICES: Eq[] = ['oven', 'stove', 'fryer', 'microwave', 'counter', 'fridge']
+const EQ_CHOICES: Eq[] = ['oven', 'stove', 'fryer', 'smoker', 'microwave', 'counter', 'fridge']
 
 function AddRecipeModal({ dish, nextSort, onClose, onPicked }: { dish: Dish; nextSort: number; onClose: () => void; onPicked: OnPicked }) {
   const { upsert } = useDB()
@@ -221,7 +221,7 @@ function AddRecipeModal({ dish, nextSort, onClose, onPicked }: { dish: Dish; nex
   const save = () => {
     const prepN = Math.max(0, Math.round(Number(prep) || 0))
     const cookN = Math.max(0, Math.round(Number(cook) || 0))
-    const tempN = eq === 'oven' ? Number(temp) || null : null
+    const tempN = eq === 'oven' || eq === 'smoker' ? Number(temp) || null : null
     const id = `${dish.id}-own-${Date.now().toString(36)}`
     const stepList = steps.split('\n').map((l) => l.trim()).filter(Boolean)
     const ingredients = ing.split('\n').map((l) => l.trim()).filter(Boolean).map(parseIngredient)
@@ -286,7 +286,7 @@ function AddRecipeModal({ dish, nextSort, onClose, onPicked }: { dish: Dish; nex
               {EQ_CHOICES.map((x) => <option key={x} value={x}>{EQ[x].emoji} {EQ[x].label}</option>)}
             </select>
           </label>
-          {eq === 'oven' && <label>Oven °F<input type="number" min="150" max="550" value={temp} onChange={(e) => setTemp(e.target.value)} /></label>}
+          {(eq === 'oven' || eq === 'smoker') && <label>{eq === 'oven' ? 'Oven' : 'Smoker'} °F<input type="number" min="150" max="550" value={temp} onChange={(e) => setTemp(e.target.value)} /></label>}
           <label>When
             <select value={when} onChange={(e) => setWhen(e.target.value as 'day' | 'before')}>
               <option value="day">Thursday — ready at dinner</option>
