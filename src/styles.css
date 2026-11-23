@@ -400,3 +400,13 @@ body:has(.drag-ghost) { cursor: grabbing; user-select: none; }
   .dd-day { min-width: 0; padding: 4px 6px; font-size: .62rem; }
   .dd-day b { font-size: .8rem; }
 }
+
+/* Add / remove steps on the plan */
+.add-step-btn { margin: 0 0 10px; }
+.add-step { display: flex; flex-direction: column; gap: 8px; padding: 12px; margin-bottom: 12px; border: 2.5px dashed var(--line); border-radius: 16px; background: var(--cream); }
+.add-step .ideas { display: flex; gap: 6px; flex-wrap: wrap; }
+.add-step .ideas .chip-btn { font-size: .78rem; }
+.add-step label { display: flex; flex-direction: column; font-size: .78rem; font-weight: 800; gap: 2px; }
+.add-step .num { width: 80px; }
+.row.wrap { flex-wrap: wrap; }
+.task .x { align-self: center; }

@@ -69,6 +69,8 @@ export interface TaskState {
   task_key: string
   done: boolean
   shift_min: number
+  /** Removed from the plan (can be put back). */
+  hidden?: boolean
   updated_at?: string
 }
 

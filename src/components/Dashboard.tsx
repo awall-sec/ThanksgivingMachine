@@ -3,6 +3,8 @@ import { useDB, useNow } from '../lib/db'
 import { buildSchedule, dayKey, dinnerTime, EQ, findConflicts, LANE_ORDER, type SchedItem } from '../lib/schedule'
 import { fmtCountdown, fmtDay, fmtHour, fmtMinutes, fmtParts, fmtRelative, fmtTime, fromTZInput, toTZInput } from '../lib/format'
 import { useTimerActions } from '../lib/timers'
+import { uid } from '../lib/format'
+import type { Eq } from '../types'
 import { Turkey } from './Turkey'
 import { TimersPanel } from './Timers'
 import { confetti } from './confetti'
@@ -18,12 +20,77 @@ function useTaskActions() {
     nudge(it: SchedItem, d: number) {
       upsert('task_state', { task_key: it.key, done: it.done, shift_min: it.shift + d, updated_at: new Date().toISOString() })
     },
+    hide(it: SchedItem, hidden = true) {
+      upsert('task_state', { task_key: it.key, done: it.done, shift_min: it.shift, hidden, updated_at: new Date().toISOString() })
+    },
   }
 }
 
 const PX = 2.2 // timeline px per minute
 const SNAP = 5 // minutes
 const snapMin = (dxPx: number) => Math.round(dxPx / PX / SNAP) * SNAP
+
+const STEP_IDEAS = ['Get out the serving dishes', 'Set the table', 'Chill the drinks', 'Clear space in the fridge', 'Take out the trash', 'Run the dishwasher', 'Get out serving spoons', 'Make coffee']
+const STEP_EQ: Eq[] = ['counter', 'oven', 'stove', 'fryer', 'smoker', 'microwave', 'fridge']
+
+/** Form to put your own step (like "Get out the dishes") on the plan. */
+function AddStep({ dayKey: dk, days, dinner }: { dayKey: string; days: { key: string; date: Date }[]; dinner: Date }) {
+  const { db, upsert } = useDB()
+  const [open, setOpen] = useState(false)
+  const [label, setLabel] = useState('')
+  const [day, setDay] = useState(dk)
+  const [time, setTime] = useState('12:00')
+  const [dur, setDur] = useState('15')
+  const [eq, setEq] = useState<Eq>('counter')
+  const [temp, setTemp] = useState('350')
+  const hot = eq === 'oven' || eq === 'smoker'
+  const openForm = () => { setDay(dk); setOpen(true) }
+  const save = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!label.trim()) return
+    const at = Math.round((fromTZInput(`${day}T${time}`).getTime() - dinner.getTime()) / 60000)
+    upsert('tasks', {
+      id: `own-${uid()}`,
+      label: label.trim(),
+      offset_min: at,
+      duration_min: Math.max(1, Number(dur) || 15),
+      equipment: eq,
+      temp_f: hot ? Number(temp) || null : null,
+      sort: 1000 + db.tasks.length,
+      notes: null,
+    })
+    setLabel('')
+    setOpen(false)
+  }
+  if (!open) return <button className="btn ghost add-step-btn" onClick={openForm}>➕ Add a step</button>
+  return (
+    <form className="add-step" onSubmit={save}>
+      <input autoFocus placeholder="What needs doing? (Get out the dishes…)" value={label} onChange={(e) => setLabel(e.target.value)} aria-label="Step" className="grow" />
+      <div className="ideas">
+        {STEP_IDEAS.map((x) => <button type="button" key={x} className="chip-btn" onClick={() => setLabel(x)}>{x}</button>)}
+      </div>
+      <div className="row wrap">
+        <label>Day
+          <select value={day} onChange={(e) => setDay(e.target.value)}>
+            {days.map((d) => <option key={d.key} value={d.key}>{fmtDay(d.date)}</option>)}
+          </select>
+        </label>
+        <label>Time<input type="time" value={time} step={300} onChange={(e) => setTime(e.target.value)} /></label>
+        <label>Minutes<input type="number" min="1" max="1440" value={dur} onChange={(e) => setDur(e.target.value)} className="num" /></label>
+        <label>Where
+          <select value={eq} onChange={(e) => setEq(e.target.value as Eq)}>
+            {STEP_EQ.map((x) => <option key={x} value={x}>{EQ[x].emoji} {EQ[x].label}</option>)}
+          </select>
+        </label>
+        {hot && <label>°F<input type="number" min="150" max="550" value={temp} onChange={(e) => setTemp(e.target.value)} className="num" /></label>}
+      </div>
+      <div className="row">
+        <button className="btn primary" disabled={!label.trim()}>Add to plan</button>
+        <button type="button" className="btn ghost" onClick={() => setOpen(false)}>Cancel</button>
+      </div>
+    </form>
+  )
+}
 
 function fmtShift(min: number): string {
   const a = Math.abs(min)
@@ -85,6 +152,7 @@ function TaskRow({ it, now, conflict, compact = false, onDragStart, dragging, ov
           <>
             <button className="icon-btn sm" onClick={() => ta.nudge(it, -15)} title="15 min earlier" aria-label="Move 15 minutes earlier">−15</button>
             <button className="icon-btn sm" onClick={() => ta.nudge(it, 15)} title="15 min later" aria-label="Move 15 minutes later">+15</button>
+            <button className="x" onClick={() => ta.hide(it)} title="Remove from the plan" aria-label={`Remove ${it.label} from the plan`}>✕</button>
           </>
         )}
       </div>
@@ -163,9 +231,11 @@ function Timeline({ items, now, clash, drag, startDrag, wasDrag }: {
 }
 
 export function Dashboard() {
-  const { db, upsert } = useDB()
+  const { db, upsert, remove } = useDB()
   const now = useNow(1000)
-  const items = useMemo(() => buildSchedule(db), [db])
+  const allItems = useMemo(() => buildSchedule(db), [db])
+  const items = useMemo(() => allItems.filter((i) => !i.hidden), [allItems])
+  const hiddenItems = allItems.filter((i) => i.hidden)
   const conflicts = useMemo(() => findConflicts(items), [items])
   const clash = useMemo(() => new Set(conflicts.flatMap((c) => (c.all ?? [c.a, c.b]).map((i) => i.key))), [conflicts])
   const dinner = dinnerTime(db)
@@ -334,6 +404,7 @@ export function Dashboard() {
             )
           })}
         </div>
+        {day && <AddStep dayKey={day.key} days={days.map((d) => ({ key: d.key, date: d.date }))} dinner={dinner} />}
         {day && (
           <>
             {day.items.length > 0 && <p className="muted small drag-tip">✋ Drag a bar sideways to change its time, or drop any step on a day above to move it there.</p>}
@@ -355,6 +426,34 @@ export function Dashboard() {
         )}
         {!days.length && <p className="empty">No steps yet — pick some recipes!</p>}
       </section>
+      {hiddenItems.length > 0 && (
+        <details className="card removed">
+          <summary>🙈 Removed steps ({hiddenItems.length})</summary>
+          <ul className="removed-list">
+            {hiddenItems.map((it) => (
+              <li key={it.key}>
+                <span>
+                  {EQ[it.eq].emoji} <b>{it.label}</b>
+                  <span className="muted"> · {fmtDay(it.start)} {fmtTime(it.start)}{it.dish ? ` · ${it.dish.name}` : ''}</span>
+                </span>
+                <span className="row">
+                  <button className="chip-btn" onClick={() => ta.hide(it, false)}>↩ Put back</button>
+                  {it.choreId?.startsWith('own-') && (
+                    <button
+                      className="chip-btn"
+                      onClick={() => {
+                        if (!confirm(`Delete "${it.label}" for good?`)) return
+                        remove('tasks', it.choreId!)
+                        remove('task_state', it.key)
+                      }}
+                    >🗑 Delete</button>
+                  )}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
       {drag && dragItem && (
         <div className="drop-days" aria-hidden>
           <span className="dd-title">Move to</span>

@@ -21,11 +21,14 @@ export interface SchedItem {
   eq: Eq
   temp: number | null
   done: boolean
+  hidden: boolean
   shift: number
   kind: 'recipe' | 'chore'
   dish?: Dish
   recipe?: Recipe
   notes?: string | null
+  /** Chore id, for chores (custom ones start with own-). */
+  choreId?: string
 }
 
 export function dinnerTime(db: DB): Date {
@@ -37,11 +40,11 @@ export function buildSchedule(db: DB): SchedItem[] {
   const state = new Map(db.task_state.map((s) => [s.task_key, s]))
   const recipes = new Map(db.recipes.map((r) => [r.id, r]))
   const out: SchedItem[] = []
-  const add = (key: string, base: Omit<SchedItem, 'key' | 'start' | 'end' | 'done' | 'shift'>, at: number) => {
+  const add = (key: string, base: Omit<SchedItem, 'key' | 'start' | 'end' | 'done' | 'hidden' | 'shift'>, at: number) => {
     const s = state.get(key)
     const shift = s?.shift_min ?? 0
     const start = new Date(dinner + (at + shift) * 60000)
-    out.push({ ...base, key, start, end: new Date(start.getTime() + base.dur * 60000), done: s?.done ?? false, shift })
+    out.push({ ...base, key, start, end: new Date(start.getTime() + base.dur * 60000), done: s?.done ?? false, hidden: s?.hidden ?? false, shift })
   }
   for (const dish of db.dishes.filter((d) => !d.removed)) {
     const r = dish.chosen_recipe_id ? recipes.get(dish.chosen_recipe_id) : undefined
@@ -51,7 +54,7 @@ export function buildSchedule(db: DB): SchedItem[] {
     }
   }
   for (const c of db.tasks) {
-    add(`chore:${c.id}`, { label: c.label, dur: c.duration_min, eq: c.equipment, temp: c.temp_f, kind: 'chore', notes: c.notes }, c.offset_min)
+    add(`chore:${c.id}`, { label: c.label, dur: c.duration_min, eq: c.equipment, temp: c.temp_f, kind: 'chore', notes: c.notes, choreId: c.id }, c.offset_min)
   }
   return out.sort((a, b) => a.start.getTime() - b.start.getTime() || a.label.localeCompare(b.label))
 }
