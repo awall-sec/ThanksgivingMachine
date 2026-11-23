@@ -92,6 +92,45 @@ function AddStep({ dayKey: dk, days, dinner }: { dayKey: string; days: { key: st
   )
 }
 
+const HOT: Eq[] = ['oven', 'smoker', 'fryer']
+
+/** Inline editor for a step's start time, length and temperature. */
+function EditStep({ it, onClose }: { it: SchedItem; onClose: () => void }) {
+  const { upsert } = useDB()
+  const ta = useTaskActions()
+  const [when, setWhen] = useState(toTZInput(it.start))
+  const [dur, setDur] = useState(String(it.dur))
+  const [temp, setTemp] = useState(it.temp ? String(it.temp) : '')
+  const showTemp = HOT.includes(it.eq) || it.temp != null
+  const save = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (when) {
+      const delta = Math.round((fromTZInput(when).getTime() - it.start.getTime()) / 60000)
+      if (delta) ta.nudge(it, delta)
+    }
+    const d = Math.max(1, Math.round(Number(dur)) || it.dur)
+    const t = showTemp ? (temp.trim() ? Math.round(Number(temp)) || null : null) : it.temp
+    if (d !== it.dur || t !== it.temp) {
+      if (it.choreId) upsert('tasks', { id: it.choreId, duration_min: d, temp_f: t })
+      else if (it.recipe && it.taskId) {
+        upsert('recipes', { id: it.recipe.id, tasks: it.recipe.tasks.map((x) => (x.id === it.taskId ? { ...x, dur: d, temp: t } : x)) })
+      }
+    }
+    onClose()
+  }
+  return (
+    <form className="edit-step" onSubmit={save} onClick={(e) => e.stopPropagation()}>
+      <label>Starts<input type="datetime-local" step={300} value={when} onChange={(e) => setWhen(e.target.value)} /></label>
+      <label>Minutes<input type="number" min="1" max="2880" value={dur} onChange={(e) => setDur(e.target.value)} className="num" /></label>
+      {showTemp && <label>°F<input type="number" min="100" max="600" value={temp} placeholder="—" onChange={(e) => setTemp(e.target.value)} className="num" /></label>}
+      <div className="row">
+        <button className="btn primary sm">Save</button>
+        <button type="button" className="btn ghost sm" onClick={onClose}>Cancel</button>
+      </div>
+    </form>
+  )
+}
+
 function fmtShift(min: number): string {
   const a = Math.abs(min)
   const d = Math.floor(a / 1440)
@@ -110,6 +149,8 @@ function TaskRow({ it, now, conflict, compact = false, onDragStart, dragging, ov
   const ta = useTaskActions()
   const timers = useTimerActions()
   const [more, setMore] = useState(false)
+  const [editing, setEditing] = useState(false)
+  const startEdit = (e: React.MouseEvent) => { e.stopPropagation(); setEditing(true) }
   const late = !it.done && it.end < now
   const active = !it.done && it.start <= now && it.end > now
   const eq = EQ[it.eq]
@@ -125,7 +166,7 @@ function TaskRow({ it, now, conflict, compact = false, onDragStart, dragging, ov
       <button className="check big" onClick={() => ta.toggle(it)} aria-label={`${it.done ? 'Undo' : 'Done'}: ${it.label}`}>{it.done ? '✓' : ''}</button>
       <div className="task-body" onClick={() => setMore(!more)}>
         <div className="task-time">
-          {fmtTime(it.start)}
+          {compact ? fmtTime(it.start) : <button className="time-btn" onClick={startEdit} title="Change the time">{fmtTime(it.start)}</button>}
           {compact && <span className="muted"> · {fmtDay(it.start)}</span>}
           {late && <span className="tag late">late</span>}
           {active && <span className="tag now">now</span>}
@@ -135,7 +176,9 @@ function TaskRow({ it, now, conflict, compact = false, onDragStart, dragging, ov
         <div className="chips">
           {it.dish && <span className="chip">{it.dish.name}{it.dish.who ? ` · ${it.dish.who}` : ''}</span>}
           <span className="chip">{fmtMinutes(it.dur)}</span>
-          {it.temp && <span className="chip hot">{it.temp}°F</span>}
+          {it.temp && (compact
+            ? <span className="chip hot">{it.temp}°F</span>
+            : <button className="chip hot" onClick={startEdit} title="Change the temperature">{it.temp}°F</button>)}
           {it.shift !== 0 && (
             <button className="chip moved" onClick={(e) => { e.stopPropagation(); ta.nudge(it, -it.shift) }} title="Put back at the original time">
               moved {fmtShift(it.shift)} ↺
@@ -143,6 +186,7 @@ function TaskRow({ it, now, conflict, compact = false, onDragStart, dragging, ov
           )}
         </div>
         {more && it.notes && <p className="muted small">{it.notes}</p>}
+        {editing && <EditStep it={it} onClose={() => setEditing(false)} />}
       </div>
       <div className="task-actions">
         {it.dur >= 2 && !it.done && (
@@ -150,6 +194,7 @@ function TaskRow({ it, now, conflict, compact = false, onDragStart, dragging, ov
         )}
         {!compact && (
           <>
+            <button className="icon-btn sm" onClick={() => setEditing(!editing)} title="Edit time, length and temperature" aria-label={`Edit ${it.label}`}>✏️</button>
             <button className="icon-btn sm" onClick={() => ta.nudge(it, -15)} title="15 min earlier" aria-label="Move 15 minutes earlier">−15</button>
             <button className="icon-btn sm" onClick={() => ta.nudge(it, 15)} title="15 min later" aria-label="Move 15 minutes later">+15</button>
             <button className="x" onClick={() => ta.hide(it)} title="Remove from the plan" aria-label={`Remove ${it.label} from the plan`}>✕</button>

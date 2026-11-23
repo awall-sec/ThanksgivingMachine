@@ -29,6 +29,8 @@ export interface SchedItem {
   notes?: string | null
   /** Chore id, for chores (custom ones start with own-). */
   choreId?: string
+  /** Task id inside the recipe, for recipe steps. */
+  taskId?: string
 }
 
 export function dinnerTime(db: DB): Date {
@@ -50,7 +52,7 @@ export function buildSchedule(db: DB): SchedItem[] {
     const r = dish.chosen_recipe_id ? recipes.get(dish.chosen_recipe_id) : undefined
     if (!r) continue
     for (const t of r.tasks ?? []) {
-      add(`${r.id}:${t.id}`, { label: t.label, dur: t.dur, eq: t.eq, temp: t.temp, kind: 'recipe', dish, recipe: r }, t.at)
+      add(`${r.id}:${t.id}`, { label: t.label, dur: t.dur, eq: t.eq, temp: t.temp, kind: 'recipe', dish, recipe: r, taskId: t.id }, t.at)
     }
   }
   for (const c of db.tasks) {
