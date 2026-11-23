@@ -6,6 +6,7 @@ import { useTimerActions } from '../lib/timers'
 import { Turkey } from './Turkey'
 import { TimersPanel } from './Timers'
 import { confetti } from './confetti'
+import { addDays, dayDiff, usePointerDrag, type DragState, type DropTarget } from '../lib/drag'
 
 function useTaskActions() {
   const { upsert } = useDB()
@@ -20,7 +21,25 @@ function useTaskActions() {
   }
 }
 
-function TaskRow({ it, now, conflict, compact = false }: { it: SchedItem; now: Date; conflict?: boolean; compact?: boolean }) {
+const PX = 2.2 // timeline px per minute
+const SNAP = 5 // minutes
+const snapMin = (dxPx: number) => Math.round(dxPx / PX / SNAP) * SNAP
+
+function fmtShift(min: number): string {
+  const a = Math.abs(min)
+  const d = Math.floor(a / 1440)
+  const rest = a % 1440
+  const parts = [d ? `${d} day${d > 1 ? 's' : ''}` : '', rest ? fmtMinutes(rest) : ''].filter(Boolean).join(' ')
+  return `${parts} ${min > 0 ? 'later' : 'earlier'}`
+}
+
+interface DragProps {
+  onDragStart?: (e: React.PointerEvent) => void
+  dragging?: boolean
+  over?: boolean
+}
+
+function TaskRow({ it, now, conflict, compact = false, onDragStart, dragging, over }: { it: SchedItem; now: Date; conflict?: boolean; compact?: boolean } & DragProps) {
   const ta = useTaskActions()
   const timers = useTimerActions()
   const [more, setMore] = useState(false)
@@ -28,7 +47,14 @@ function TaskRow({ it, now, conflict, compact = false }: { it: SchedItem; now: D
   const active = !it.done && it.start <= now && it.end > now
   const eq = EQ[it.eq]
   return (
-    <li className={`task ${it.done ? 'done' : ''} ${late ? 'late' : ''} ${active ? 'active' : ''} ${conflict ? 'conflict' : ''}`} style={{ ['--lane' as string]: eq.color }}>
+    <li
+      className={`task ${it.done ? 'done' : ''} ${late ? 'late' : ''} ${active ? 'active' : ''} ${conflict ? 'conflict' : ''} ${dragging ? 'dragging' : ''} ${over ? 'drop-over' : ''}`}
+      style={{ ['--lane' as string]: eq.color }}
+      data-drop-task={compact ? undefined : it.key}
+    >
+      {onDragStart && (
+        <button className="drag-handle" onPointerDown={onDragStart} onContextMenu={(e) => e.preventDefault()} aria-label={`Drag ${it.label} to another time or day`} title="Drag onto a day, or onto another step to line up with it">⠿</button>
+      )}
       <button className="check big" onClick={() => ta.toggle(it)} aria-label={`${it.done ? 'Undo' : 'Done'}: ${it.label}`}>{it.done ? '✓' : ''}</button>
       <div className="task-body" onClick={() => setMore(!more)}>
         <div className="task-time">
@@ -43,7 +69,11 @@ function TaskRow({ it, now, conflict, compact = false }: { it: SchedItem; now: D
           {it.dish && <span className="chip">{it.dish.name}{it.dish.who ? ` · ${it.dish.who}` : ''}</span>}
           <span className="chip">{fmtMinutes(it.dur)}</span>
           {it.temp && <span className="chip hot">{it.temp}°F</span>}
-          {it.shift !== 0 && <span className="chip">{it.shift > 0 ? '+' : ''}{it.shift}m moved</span>}
+          {it.shift !== 0 && (
+            <button className="chip moved" onClick={(e) => { e.stopPropagation(); ta.nudge(it, -it.shift) }} title="Put back at the original time">
+              moved {fmtShift(it.shift)} ↺
+            </button>
+          )}
         </div>
         {more && it.notes && <p className="muted small">{it.notes}</p>}
       </div>
@@ -62,10 +92,16 @@ function TaskRow({ it, now, conflict, compact = false }: { it: SchedItem; now: D
   )
 }
 
-function Timeline({ items, now, clash }: { items: SchedItem[]; now: Date; clash: Set<string> }) {
+function Timeline({ items, now, clash, drag, startDrag, wasDrag }: {
+  items: SchedItem[]
+  now: Date
+  clash: Set<string>
+  drag: DragState | null
+  startDrag: (e: React.PointerEvent, key: string) => void
+  wasDrag: () => boolean
+}) {
   const ta = useTaskActions()
-  if (!items.length) return null
-  const PX = 2.2 // px per minute
+  if (!items.length) return <p className="muted small tl-empty">Nothing planned this day yet — drag a step onto this day's tab to move it here.</p>
   const t0 = new Date(Math.min(...items.map((i) => i.start.getTime())))
   t0.setMinutes(0, 0, 0)
   const t1 = new Date(Math.max(...items.map((i) => i.end.getTime())))
@@ -98,17 +134,25 @@ function Timeline({ items, now, clash }: { items: SchedItem[]; now: Date; clash:
             <div className="tl-name" style={{ background: EQ[l.eq].color }}>{EQ[l.eq].emoji} {EQ[l.eq].label}</div>
             <div className="tl-track" style={{ width }}>
               {hours.map((h) => <i key={h.getTime()} className="tl-grid" style={{ left: x(h) }} />)}
-              {l.placed.map(({ it, r }) => (
-                <button
-                  key={it.key}
-                  className={`tl-bar ${it.done ? 'done' : ''} ${clash.has(it.key) ? 'conflict' : ''}`}
-                  style={{ left: x(it.start), width: Math.max(it.dur * PX, 30), top: 6 + r * 40, background: EQ[l.eq].color }}
-                  title={`${fmtTime(it.start)}–${fmtTime(it.end)} ${it.label}${it.temp ? ` (${it.temp}°F)` : ''}`}
-                  onClick={() => ta.toggle(it)}
-                >
-                  {it.done ? '✓ ' : ''}{it.temp ? `${it.temp}° ` : ''}{it.label}
-                </button>
-              ))}
+              {l.placed.map(({ it, r }) => {
+                const mine = drag?.key === `bar:${it.key}`
+                const free = mine && !drag!.target
+                const shift = free ? snapMin(drag!.dx) : 0
+                return (
+                  <button
+                    key={it.key}
+                    className={`tl-bar ${it.done ? 'done' : ''} ${clash.has(it.key) ? 'conflict' : ''} ${mine ? 'dragging' : ''}`}
+                    style={{ left: x(it.start) + shift * PX, width: Math.max(it.dur * PX, 30), top: 6 + r * 40, background: EQ[l.eq].color }}
+                    title={`${fmtTime(it.start)}–${fmtTime(it.end)} ${it.label}${it.temp ? ` (${it.temp}°F)` : ''} · drag to move, tap to mark done`}
+                    onPointerDown={(e) => startDrag(e, `bar:${it.key}`)}
+                    onContextMenu={(e) => e.preventDefault()}
+                    onClick={() => { if (!wasDrag()) ta.toggle(it) }}
+                  >
+                    {free && <span className="tl-when">{fmtTime(new Date(it.start.getTime() + shift * 60000))}</span>}
+                    {it.done ? '✓ ' : ''}{it.temp ? `${it.temp}° ` : ''}{it.label}
+                  </button>
+                )
+              })}
               {nowIn && <div className="tl-now" style={{ left: x(now) }} />}
             </div>
           </div>
@@ -128,6 +172,7 @@ export function Dashboard() {
   const [editDinner, setEditDinner] = useState(false)
   const unpicked = [...db.dishes].sort((a, b) => a.sort - b.sort).filter((d) => !d.removed && !d.chosen_recipe_id && db.recipes.some((r) => r.dish_id === d.id))
 
+  // Every day from the day before the first step through dinner day, so steps can be dragged onto empty days too.
   const days = useMemo(() => {
     const m = new Map<string, { key: string; date: Date; items: SchedItem[] }>()
     for (const it of items) {
@@ -135,8 +180,52 @@ export function Dashboard() {
       if (!m.has(k)) m.set(k, { key: k, date: it.start, items: [] })
       m.get(k)!.items.push(it)
     }
-    return [...m.values()].sort((a, b) => a.date.getTime() - b.date.getTime())
-  }, [items])
+    const keys = [...m.keys(), dayKey(dinner)].sort()
+    if (items.length) {
+      const last = keys[keys.length - 1]
+      for (let k = addDays(keys[0], -1); k <= last; k = addDays(k, 1)) {
+        if (!m.has(k)) m.set(k, { key: k, date: fromTZInput(`${k}T12:00`), items: [] })
+      }
+    }
+    return [...m.values()].sort((a, b) => a.key.localeCompare(b.key))
+  }, [items, dinner.getTime()])
+
+  const ta = useTaskActions()
+  const onDrop = (dragKey: string, dx: number, target: DropTarget) => {
+    const [mode, ...rest] = dragKey.split(':')
+    const key = rest.join(':')
+    const it = items.find((i) => i.key === key)
+    if (!it) return
+    let delta = 0
+    if (target && 'day' in target) {
+      delta = dayDiff(dayKey(it.start), target.day) * 1440
+      if (mode === 'bar') delta += snapMin(dx)
+      setPickedDay(target.day)
+    } else if (target && 'taskKey' in target) {
+      const t = items.find((i) => i.key === target.taskKey)
+      if (t && t.key !== key) delta = Math.round((t.start.getTime() - it.start.getTime()) / 60000)
+    } else if (mode === 'bar') delta = snapMin(dx)
+    if (delta) ta.nudge(it, delta)
+  }
+  const { drag, start: startDrag, wasDrag } = usePointerDrag(onDrop)
+  const dragItem = drag ? items.find((i) => drag.key.endsWith(`:${i.key}`)) : undefined
+  const dragHint = (() => {
+    if (!drag || !dragItem) return ''
+    const t = drag.target
+    if (t && 'day' in t) {
+      const d = days.find((x) => x.key === t.day)
+      return `→ ${d ? fmtDay(d.date) : t.day} at ${fmtTime(new Date(dragItem.start.getTime() + (drag.key.startsWith('bar:') ? snapMin(drag.dx) : 0) * 60000))}`
+    }
+    if (t && 'taskKey' in t) {
+      const o = items.find((i) => i.key === t.taskKey)
+      return o && o.key !== dragItem.key ? `→ ${fmtTime(o.start)} with ${o.label}` : ''
+    }
+    if (drag.key.startsWith('bar:')) {
+      const m = snapMin(drag.dx)
+      return m ? `${m > 0 ? '+' : ''}${m} min` : ''
+    }
+    return 'Drop on a day or another step'
+  })()
   const [pickedDay, setPickedDay] = useState<string | null>(null)
   const today = dayKey(now)
   const defaultDay = days.find((d) => d.key === today)?.key ?? days.find((d) => d.key > today)?.key ?? days[days.length - 1]?.key
@@ -187,7 +276,7 @@ export function Dashboard() {
                 {(c.all ?? [c.a, c.b]).map((it, j, arr) => (
                   <span key={it.key}><b>{it.label}</b> ({fmtTime(it.start)}){j < arr.length - 2 ? ', ' : j === arr.length - 2 ? ' and ' : ''}</span>
                 ))}
-                . Nudge one with ±15.
+                . Drag one to a new time or nudge it with ±15.
               </li>
             ))}
           </ul>
@@ -230,22 +319,63 @@ export function Dashboard() {
             const left = d.items.filter((i) => !i.done).length
             const isThu = d.key === dayKey(dinner)
             return (
-              <button key={d.key} role="tab" aria-selected={d.key === activeDay} className={d.key === activeDay ? 'on' : ''} onClick={() => setPickedDay(d.key)}>
+              <button
+                key={d.key}
+                role="tab"
+                aria-selected={d.key === activeDay}
+                data-drop-day={d.key}
+                className={`${d.key === activeDay ? 'on' : ''} ${drag?.target && 'day' in drag.target && drag.target.day === d.key ? 'drop-over' : ''}`}
+                onClick={() => setPickedDay(d.key)}
+              >
                 <span className="dt-day">{isThu ? '🦃 ' : ''}{fmtParts(d.date, { weekday: 'short' })}</span>
                 <span className="dt-date">{fmtParts(d.date, { month: 'short', day: 'numeric' })}</span>
-                <span className={`dt-count ${left ? '' : 'zero'}`}>{left ? `${left} to do` : '✓ done'}</span>
+                <span className={`dt-count ${left ? '' : 'zero'}`}>{!d.items.length ? 'free' : left ? `${left} to do` : '✓ done'}</span>
               </button>
             )
           })}
         </div>
         {day && (
           <>
-            <Timeline items={day.items} now={now} clash={clash} />
-            <ul className="tasks">{day.items.map((it) => <TaskRow key={it.key} it={it} now={now} conflict={clash.has(it.key)} />)}</ul>
+            {day.items.length > 0 && <p className="muted small drag-tip">✋ Drag a bar sideways to change its time, or drop any step on a day above to move it there.</p>}
+            <Timeline items={day.items} now={now} clash={clash} drag={drag} startDrag={startDrag} wasDrag={wasDrag} />
+            <ul className="tasks">
+              {day.items.map((it) => (
+                <TaskRow
+                  key={it.key}
+                  it={it}
+                  now={now}
+                  conflict={clash.has(it.key)}
+                  onDragStart={(e) => startDrag(e, `row:${it.key}`, true)}
+                  dragging={drag?.key === `row:${it.key}`}
+                  over={!!drag && !!drag.target && 'taskKey' in drag.target && drag.target.taskKey === it.key && !drag.key.endsWith(`:${it.key}`)}
+                />
+              ))}
+            </ul>
           </>
         )}
         {!days.length && <p className="empty">No steps yet — pick some recipes!</p>}
       </section>
+      {drag && dragItem && (
+        <div className="drop-days" aria-hidden>
+          <span className="dd-title">Move to</span>
+          {days.map((d) => (
+            <div
+              key={d.key}
+              data-drop-day={d.key}
+              className={`dd-day ${d.key === dayKey(dragItem.start) ? 'here' : ''} ${drag.target && 'day' in drag.target && drag.target.day === d.key ? 'drop-over' : ''}`}
+            >
+              <b>{d.key === dayKey(dinner) ? '🦃 ' : ''}{fmtParts(d.date, { weekday: 'short' })}</b>
+              <span>{fmtParts(d.date, { month: 'short', day: 'numeric' })}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      {drag && dragItem && (
+        <div className="drag-ghost" style={{ left: drag.x + 14, top: drag.y + 14 }}>
+          <b>{EQ[dragItem.eq].emoji} {dragItem.label}</b>
+          {dragHint && <span>{dragHint}</span>}
+        </div>
+      )}
     </div>
   )
 }

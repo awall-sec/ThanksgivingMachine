@@ -353,3 +353,50 @@ summary { cursor: pointer; font-weight: 800; color: var(--orange-dark); }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+/* Drag and drop on the plan */
+.tl-bar, .drag-handle { -webkit-touch-callout: none; user-select: none; -webkit-user-select: none; }
+.tl-bar { cursor: grab; }
+.tl-bar.dragging { cursor: grabbing; z-index: 5; overflow: visible; box-shadow: 0 6px 0 var(--line); transform: translateY(-3px); }
+.tl-when {
+  position: absolute; bottom: calc(100% + 4px); left: -2px; background: var(--ink); color: #fff; border-radius: 8px;
+  padding: 1px 7px; font-size: .72rem; pointer-events: none;
+}
+.drag-handle {
+  flex: none; align-self: center; width: 26px; height: 40px; border: none; background: none; padding: 0;
+  font-size: 1.3rem; color: var(--ink-soft); cursor: grab; touch-action: none; border-radius: 8px;
+}
+.drag-handle:hover { background: var(--cream); }
+.task.dragging { opacity: .5; }
+.task.drop-over { outline: 3px solid var(--orange); outline-offset: 2px; background: #fff6ea; }
+.day-tabs button.drop-over { outline: 4px solid var(--leaf); outline-offset: 2px; transform: scale(1.06); }
+.drag-ghost {
+  position: fixed; z-index: 100; pointer-events: none; display: flex; flex-direction: column; gap: 2px; max-width: 260px;
+  background: var(--paper); border: 3px solid var(--line); border-radius: 14px; padding: 6px 10px; box-shadow: 0 5px 0 var(--line);
+  font-size: .85rem;
+}
+.drag-ghost span { color: var(--orange); font-weight: 800; }
+.drag-tip { margin: 0 0 8px; }
+.tl-empty { margin: 4px 0 14px; }
+body:has(.drag-ghost) { cursor: grabbing; user-select: none; }
+.drop-days {
+  position: fixed; z-index: 90; top: 8px; left: 0; right: 0; margin-inline: auto; width: max-content; max-width: calc(100vw - 16px); box-sizing: border-box;
+  display: flex; align-items: center; gap: 6px; overflow-x: auto; padding: 8px 10px;
+  background: var(--paper); border: 3px solid var(--line); border-radius: 18px; box-shadow: 0 5px 0 var(--line);
+}
+.dd-title { font: 700 .85rem 'Fredoka'; white-space: nowrap; padding-right: 2px; }
+.dd-day {
+  flex: none; display: flex; flex-direction: column; align-items: center; min-width: 54px; padding: 6px 8px;
+  border: 2.5px dashed var(--line); border-radius: 12px; font-size: .75rem; background: #fff;
+}
+.dd-day b { font: 700 .95rem 'Fredoka'; }
+.dd-day.here { background: var(--cream); }
+.dd-day.drop-over { background: var(--leaf); color: #fff; border-style: solid; transform: scale(1.08); }
+.chip.moved { cursor: pointer; font-family: inherit; border-style: dashed; }
+.chip.moved:hover { background: var(--mustard); }
+@media (max-width: 600px) {
+  .drop-days { gap: 4px; padding: 6px; border-radius: 14px; }
+  .dd-title { display: none; }
+  .dd-day { min-width: 0; padding: 4px 6px; font-size: .62rem; }
+  .dd-day b { font-size: .8rem; }
+}
